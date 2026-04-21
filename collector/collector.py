@@ -793,6 +793,8 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                             etype = event.get("event_type", "")
 
                             if etype == "book":
+                                # book даёт полный стакан для ОДНОГО токена
+                                # Берём мидпоинт только если стакан непустой
                                 aid  = event.get("asset_id")
                                 bids = event.get("bids", [])
                                 asks = event.get("asks", [])
@@ -800,19 +802,29 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                                     try:
                                         bb = float(bids[0]["price"])
                                         ba = float(asks[0]["price"])
-                                        prices[aid] = round((bb + ba) / 2 * 100, 2)
-                                        updated = True
+                                        mid = round((bb + ba) / 2 * 100, 2)
+                                        # Игнорируем если мидпоинт ровно 50 — это артефакт
+                                        if mid != 50.0:
+                                            prices[aid] = mid
+                                            updated = True
                                     except: pass
 
                             elif etype == "price_change":
+                                # price_change содержит оба токена в одном событии
                                 for pc in event.get("price_changes", []):
                                     aid = pc.get("asset_id")
                                     bb  = pc.get("best_bid")
                                     ba  = pc.get("best_ask")
                                     if aid and bb and ba:
                                         try:
-                                            prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
-                                            updated = True
+                                            bb_f = float(bb)
+                                            ba_f = float(ba)
+                                            # Пропускаем если bid=0 или ask=1 — нет ликвидности
+                                            if bb_f > 0 and ba_f < 1:
+                                                mid = round((bb_f + ba_f) / 2 * 100, 2)
+                                                if mid != 50.0:
+                                                    prices[aid] = mid
+                                                    updated = True
                                         except: pass
 
                             elif etype == "best_bid_ask":
@@ -821,8 +833,13 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                                 ba  = event.get("best_ask")
                                 if aid and bb and ba:
                                     try:
-                                        prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
-                                        updated = True
+                                        bb_f = float(bb)
+                                        ba_f = float(ba)
+                                        if bb_f > 0 and ba_f < 1:
+                                            mid = round((bb_f + ba_f) / 2 * 100, 2)
+                                            if mid != 50.0:
+                                                prices[aid] = mid
+                                                updated = True
                                     except: pass
 
                             elif etype == "last_trade_price":
