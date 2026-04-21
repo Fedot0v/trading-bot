@@ -703,118 +703,170 @@ async def signal_task(collector: DataCollector):
 
 async def polymarket_fast_poll(collector: DataCollector, market: dict):
     """
-    Получает цены через Gamma API outcomePrices.
-    Обновляем рынок через API каждые 3 секунды — Gamma кешируется,
-    но при каждом запросе отдаёт свежий объект рынка.
-    Это единственный метод который работает через VPN.
+    CLOB WebSocket для реальных цен Polymarket.
+    Обновление при каждой сделке — задержка ~50-100ms.
+    Работает из Франкфурта без блокировок.
     """
-    cid  = market.get('conditionId', '')
-    slug = market.get('slug', '')
+    import websockets as _ws
 
-    print(f'[Poly POLL] Старт | рынок: {market.get("question","")}')
+    clob_ids = market.get("clobTokenIds", [])
+    if not clob_ids:
+        print("[Poly WS] Нет clobTokenIds — fallback на Gamma API")
+        return
 
-    connector = aiohttp.TCPConnector(ssl=False, limit=5)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        error_count = 0
-        first_price = True
+    cid  = market.get("conditionId", "")
+    slug = market.get("slug", "")
 
-        while True:
-            try:
-                # Запрашиваем свежий рынок напрямую по slug
-                url = f"{POLYMARKET_GAMMA}/markets?slug={slug}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
-                    if r.status != 200:
-                        await asyncio.sleep(3)
-                        continue
-                    data = await r.json()
+    # Определяем какой токен UP а какой DOWN
+    outcomes_raw = market.get("outcomes", [])
+    if isinstance(outcomes_raw, str):
+        import json as _j
+        try: outcomes_raw = _j.loads(outcomes_raw)
+        except: outcomes_raw = []
 
-                markets_list = data if isinstance(data, list) else data.get('markets', [data])
-                if not markets_list:
-                    await asyncio.sleep(3)
-                    continue
+    token_to_outcome = {}
+    for i, tid in enumerate(clob_ids[:2]):
+        if i < len(outcomes_raw):
+            token_to_outcome[tid] = str(outcomes_raw[i]).lower()
 
-                m = markets_list[0]
+    subscribe_msg = json.dumps({
+        "assets_ids": clob_ids[:2],
+        "type": "market",
+        "custom_feature_enabled": True
+    })
 
-                import json as _j
-                outcomes_raw = m.get('outcomes', [])
-                prices_raw   = m.get('outcomePrices', [])
-                if isinstance(outcomes_raw, str):
-                    try: outcomes_raw = _j.loads(outcomes_raw)
-                    except: outcomes_raw = []
-                if isinstance(prices_raw, str):
-                    try: prices_raw = _j.loads(prices_raw)
-                    except: prices_raw = []
+    ws_url = POLYMARKET_WS
+    prices = {}  # token_id → цена в центах
+    last_up = last_down = None
+    retry = 1
 
-                up_price = down_price = None
-                for i, outcome in enumerate(outcomes_raw):
-                    o = str(outcome).lower()
+    print(f"[Poly WS] Подключаюсь... токенов: {len(clob_ids[:2])}")
+
+    while True:
+        try:
+            headers = {
+                "Origin": "https://polymarket.com",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+            }
+            async with _ws.connect(
+                ws_url,
+                additional_headers=headers,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+                max_size=10_000_000,
+            ) as ws:
+                await ws.send(subscribe_msg)
+                print("[Poly WS] Подключён ✓")
+                retry = 1
+
+                async for raw in ws:
                     try:
-                        p = float(prices_raw[i]) * 100 if i < len(prices_raw) else None
-                    except:
-                        p = None
-                    if p is None:
-                        continue
-                    if o in ('up', 'higher', 'yes'):
-                        up_price = p
-                    elif o in ('down', 'lower', 'no'):
-                        down_price = p
+                        msg = json.loads(raw)
+                        events = msg if isinstance(msg, list) else [msg]
 
-                if up_price is None and down_price is None:
-                    error_count += 1
-                    if error_count % 10 == 0:
-                        print(f'[Poly POLL] Цены не найдены. outcomes={outcomes_raw} prices={prices_raw}')
-                    await asyncio.sleep(3)
-                    continue
+                        updated = False
+                        for event in events:
+                            etype = event.get("event_type", "")
 
-                if up_price is None:
-                    up_price = 100 - down_price
-                if down_price is None:
-                    down_price = 100 - up_price
+                            if etype == "book":
+                                aid  = event.get("asset_id")
+                                bids = event.get("bids", [])
+                                asks = event.get("asks", [])
+                                if aid and bids and asks:
+                                    try:
+                                        bb = float(bids[0]["price"])
+                                        ba = float(asks[0]["price"])
+                                        prices[aid] = round((bb + ba) / 2 * 100, 2)
+                                        updated = True
+                                    except: pass
 
-                now  = time.time()
-                mins = 0.0
-                for part in reversed(slug.split('-')):
-                    if part.isdigit() and len(part) >= 9:
-                        mins = (now - int(part)) / 60
-                        break
+                            elif etype == "price_change":
+                                for pc in event.get("price_changes", []):
+                                    aid = pc.get("asset_id")
+                                    bb  = pc.get("best_bid")
+                                    ba  = pc.get("best_ask")
+                                    if aid and bb and ba:
+                                        try:
+                                            prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
+                                            updated = True
+                                        except: pass
 
-                old_snap = collector.poly_snapshot
-                new_up   = round(up_price, 2)
-                new_down = round(down_price, 2)
+                            elif etype == "best_bid_ask":
+                                aid = event.get("asset_id")
+                                bb  = event.get("best_bid")
+                                ba  = event.get("best_ask")
+                                if aid and bb and ba:
+                                    try:
+                                        prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
+                                        updated = True
+                                    except: pass
 
-                snap = PolySnapshot(
-                    ts=now,
-                    market_id=cid,
-                    up_price=new_up,
-                    down_price=new_down,
-                    btc_strike=0,
-                    minutes_elapsed=round(mins, 2),
-                )
-                collector.poly_snapshot = snap
+                            elif etype == "last_trade_price":
+                                aid = event.get("asset_id")
+                                p   = event.get("price")
+                                if aid and p:
+                                    try:
+                                        prices[aid] = round(float(p) * 100, 2)
+                                        updated = True
+                                    except: pass
 
-                # Логируем первую цену и каждое изменение
-                if first_price:
-                    print(f'[Poly POLL] ✓ Первая цена: UP={new_up:.1f}¢ DOWN={new_down:.1f}¢')
-                    first_price = False
-                    error_count = 0
-                elif old_snap and abs(new_up - old_snap.up_price) >= 0.5:
-                    diff = new_up - old_snap.up_price
-                    print(f'  [Poly] UP: {old_snap.up_price:.1f}¢ → {new_up:.1f}¢ ({diff:+.1f}¢)')
+                        if updated and prices:
+                            up_price = down_price = None
+                            for tid, p in prices.items():
+                                outcome = token_to_outcome.get(tid, "")
+                                if outcome in ("up", "higher", "yes"):
+                                    up_price = p
+                                elif outcome in ("down", "lower", "no"):
+                                    down_price = p
 
-                # Пишем в CSV при каждом изменении
-                if not old_snap or new_up != old_snap.up_price:
-                    collector._write_csv('/app/data/live_polymarket.csv', [
-                        f'{now:.3f}', cid,
-                        f'{new_up:.4f}', f'{new_down:.4f}',
-                        0, f'{mins:.2f}', '0',
-                    ])
+                            if up_price is None and down_price is not None:
+                                up_price = round(100 - down_price, 2)
+                            elif down_price is None and up_price is not None:
+                                down_price = round(100 - up_price, 2)
 
-            except Exception as e:
-                error_count += 1
-                if error_count <= 3 or error_count % 20 == 0:
-                    print(f'[Poly POLL error #{error_count}] {e}')
+                            if up_price is not None and down_price is not None:
+                                now  = time.time()
+                                mins = 0.0
+                                for part in reversed(slug.split("-")):
+                                    if part.isdigit() and len(part) >= 9:
+                                        mins = (now - int(part)) / 60
+                                        break
 
-            await asyncio.sleep(3)  # Gamma кешируется — чаще нет смысла
+                                snap = PolySnapshot(
+                                    ts=now,
+                                    market_id=cid,
+                                    up_price=up_price,
+                                    down_price=down_price,
+                                    btc_strike=0,
+                                    minutes_elapsed=round(mins, 2),
+                                )
+                                collector.poly_snapshot = snap
+
+                                # Логируем изменения
+                                if last_up is None:
+                                    print(f"[Poly WS] ✓ Первая цена: UP={up_price:.1f}¢ DOWN={down_price:.1f}¢")
+                                elif abs(up_price - last_up) >= 0.5:
+                                    diff = up_price - last_up
+                                    print(f"  [Poly] UP: {last_up:.1f}¢ → {up_price:.1f}¢ ({diff:+.1f}¢)")
+
+                                # Пишем в CSV только при изменении
+                                if last_up != up_price or last_down != down_price:
+                                    collector._write_csv("/app/data/live_polymarket.csv", [
+                                        f"{now:.3f}", cid,
+                                        f"{up_price:.4f}", f"{down_price:.4f}",
+                                        0, f"{mins:.2f}", "0",
+                                    ])
+                                    last_up   = up_price
+                                    last_down = down_price
+
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print(f"[Poly WS] Ошибка: {e} — реконнект через {retry}с")
+            await asyncio.sleep(retry)
+            retry = min(retry * 2, 30)
 
 
 async def polymarket_task(collector: DataCollector):
