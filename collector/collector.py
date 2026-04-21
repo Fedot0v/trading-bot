@@ -141,19 +141,19 @@ class DataCollector:
         """Создаёт CSV файлы с заголовками."""
 
         files = {
-            "live_binance.csv": [
+            "/app/data/live_binance.csv": [
                 "ts", "price", "qty", "vol_usdt", "side", "cvd_delta", "cvd_cumulative"
             ],
-            "live_polymarket.csv": [
+            "/app/data/live_polymarket.csv": [
                 "ts", "market_id", "up_price", "down_price",
                 "btc_strike", "minutes_elapsed", "spread"
             ],
-            "live_signals.csv": [
+            "/app/data/live_signals.csv": [
                 "ts", "btc_price", "direction", "flow_imb_5s",
                 "cvd_5s", "trade_count_5s",
                 "poly_up", "poly_down", "poly_market_id"
             ],
-            "live_trades.csv": [
+            "/app/data/live_trades.csv": [
                 "signal_ts", "direction", "btc_price_entry",
                 "poly_price_entry", "trade_size_usd",
                 "exit_3s", "exit_5s", "exit_8s", "exit_10s", "exit_15s", "exit_30s",
@@ -191,7 +191,7 @@ class DataCollector:
                       side=side, cvd_delta=cvd_d)
             self.trades_buffer.append(t)
 
-            self._write_csv("live_binance.csv", [
+            self._write_csv("/app/data/live_binance.csv", [
                 f"{ts:.3f}", price, qty, f"{vol_usdt:.2f}",
                 side, f"{cvd_d:.2f}", f"{self.cvd_cumulative:.2f}"
             ])
@@ -263,7 +263,7 @@ class DataCollector:
         self.total_signals += 1
         self.pending_signals.append(sig)
 
-        self._write_csv("live_signals.csv", [
+        self._write_csv("/app/data/live_signals.csv", [
             f"{sig.ts:.3f}", f"{sig.btc_price:.2f}", sig.direction,
             f"{sig.flow_imb:.4f}", f"{sig.cvd_5s:.0f}", sig.trade_count,
             sig.poly_up_price, sig.poly_down_price, sig.poly_market_id
@@ -420,7 +420,7 @@ class DataCollector:
             data = sig.exits.get(ex, {})
             row.append(f"{data.get('poly_move', ''):.4f}" if data.get('poly_move') is not None else "")
 
-        self._write_csv("live_trades.csv", row)
+        self._write_csv("/app/data/live_trades.csv", row)
         self.completed_trades.append(sig)
 
         # Итоговый P&L по сделке
@@ -644,7 +644,7 @@ async def get_poly_prices(session: aiohttp.ClientSession,
         collector.poly_snapshot = snap
 
         spread = abs(up_price + down_price - 100)
-        collector._write_csv("live_polymarket.csv", [
+        collector._write_csv("/app/data/live_polymarket.csv", [
             f"{now:.3f}", condition_id,
             f"{up_price:.4f}", f"{down_price:.4f}",
             snap.btc_strike, f"{mins_elapsed:.2f}",
@@ -803,7 +803,7 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
 
                 # Пишем в CSV при каждом изменении
                 if not old_snap or new_up != old_snap.up_price:
-                    collector._write_csv('live_polymarket.csv', [
+                    collector._write_csv('/app/data/live_polymarket.csv', [
                         f'{now:.3f}', cid,
                         f'{new_up:.4f}', f'{new_down:.4f}',
                         0, f'{mins:.2f}', '0',
@@ -1027,7 +1027,7 @@ async def main():
             print(line)
             summary_lines.append(line)
 
-        with open("live_summary.txt", "w", encoding="utf-8") as f:
+        with open("/app/data/live_summary.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(summary_lines))
 
         print("\nФайлы сохранены:")
