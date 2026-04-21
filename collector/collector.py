@@ -710,6 +710,13 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
     import websockets as _ws
 
     clob_ids = market.get("clobTokenIds", [])
+    # clobTokenIds может прийти как строка JSON — парсим
+    if isinstance(clob_ids, str):
+        import json as _json
+        try:
+            clob_ids = _json.loads(clob_ids)
+        except:
+            clob_ids = []
     if not clob_ids:
         print("[Poly WS] Нет clobTokenIds — fallback на Gamma API")
         return
