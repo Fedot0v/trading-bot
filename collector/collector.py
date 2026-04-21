@@ -759,9 +759,22 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                 print("[Poly WS] Подключён ✓")
                 retry = 1
                 # Ждём welcome сообщение от сервера
-                await asyncio.sleep(0.5)
+                # Сначала читаем что сервер говорит при подключении
+                try:
+                    welcome = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                    print(f"[Poly WS] Welcome: {welcome[:200]}")
+                except asyncio.TimeoutError:
+                    print("[Poly WS] Нет welcome сообщения — отправляем подписку")
+
                 await ws.send(subscribe_msg)
-                print("[Poly WS] Подписка отправлена")
+                print(f"[Poly WS] Подписка отправлена: {subscribe_msg[:100]}")
+
+                # Читаем первый ответ
+                try:
+                    first = await asyncio.wait_for(ws.recv(), timeout=3.0)
+                    print(f"[Poly WS] Первый ответ: {first[:300]}")
+                except asyncio.TimeoutError:
+                    print("[Poly WS] Нет ответа на подписку")
 
                 async for raw in ws:
                     try:
