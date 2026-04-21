@@ -756,9 +756,12 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                 close_timeout=5,
                 max_size=10_000_000,
             ) as ws:
-                await ws.send(subscribe_msg)
                 print("[Poly WS] Подключён ✓")
                 retry = 1
+                # Ждём welcome сообщение от сервера
+                await asyncio.sleep(0.5)
+                await ws.send(subscribe_msg)
+                print("[Poly WS] Подписка отправлена")
 
                 async for raw in ws:
                     try:
