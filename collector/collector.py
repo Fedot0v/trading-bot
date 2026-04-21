@@ -792,25 +792,21 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                         for event in events:
                             etype = event.get("event_type", "")
 
-                            if etype == "book":
-                                # book даёт полный стакан для ОДНОГО токена
-                                # Берём мидпоинт только если стакан непустой
-                                aid  = event.get("asset_id")
-                                bids = event.get("bids", [])
-                                asks = event.get("asks", [])
-                                if aid and bids and asks:
+                            if etype == "last_trade_price":
+                                # Только реальные сделки — без артефактов мидпоинта
+                                aid = event.get("asset_id")
+                                p   = event.get("price")
+                                if aid and p:
                                     try:
-                                        bb = float(bids[0]["price"])
-                                        ba = float(asks[0]["price"])
-                                        mid = round((bb + ba) / 2 * 100, 2)
-                                        # Игнорируем если мидпоинт ровно 50 — это артефакт
-                                        if mid != 50.0:
-                                            prices[aid] = mid
+                                        price_cents = round(float(p) * 100, 2)
+                                        # Игнорируем ровно 50¢ — может быть дефолтным значением
+                                        if price_cents != 50.0:
+                                            prices[aid] = price_cents
                                             updated = True
                                     except: pass
 
                             elif etype == "price_change":
-                                # price_change содержит оба токена в одном событии
+                                # price_change как резерв — используем только если есть реальный спред
                                 for pc in event.get("price_changes", []):
                                     aid = pc.get("asset_id")
                                     bb  = pc.get("best_bid")
@@ -819,38 +815,14 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                                         try:
                                             bb_f = float(bb)
                                             ba_f = float(ba)
-                                            # Пропускаем если bid=0 или ask=1 — нет ликвидности
-                                            if bb_f > 0 and ba_f < 1:
+                                            spread = ba_f - bb_f
+                                            # Только если спред разумный (< 10%) и обе стороны живые
+                                            if bb_f > 0.02 and ba_f < 0.98 and spread < 0.10:
                                                 mid = round((bb_f + ba_f) / 2 * 100, 2)
-                                                if mid != 50.0:
-                                                    prices[aid] = mid
-                                                    updated = True
-                                        except: pass
-
-                            elif etype == "best_bid_ask":
-                                aid = event.get("asset_id")
-                                bb  = event.get("best_bid")
-                                ba  = event.get("best_ask")
-                                if aid and bb and ba:
-                                    try:
-                                        bb_f = float(bb)
-                                        ba_f = float(ba)
-                                        if bb_f > 0 and ba_f < 1:
-                                            mid = round((bb_f + ba_f) / 2 * 100, 2)
-                                            if mid != 50.0:
                                                 prices[aid] = mid
                                                 updated = True
-                                    except: pass
-
-                            elif etype == "last_trade_price":
-                                aid = event.get("asset_id")
-                                p   = event.get("price")
-                                if aid and p:
-                                    try:
-                                        prices[aid] = round(float(p) * 100, 2)
-                                        updated = True
-                                    except: pass
-
+                                        except: pass
+                            
                         if updated and prices:
                             up_price = down_price = None
                             for tid, p in prices.items():
