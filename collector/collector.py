@@ -843,10 +843,11 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                                 elif outcome in ("down", "lower", "no"):
                                     down_price = p
 
-                            if up_price is None and down_price is not None:
-                                up_price = round(100 - down_price, 2)
-                            elif down_price is None and up_price is not None:
-                                down_price = round(100 - up_price, 2)
+                            # НЕ вычисляем второй токен из первого
+                            # Ждём пока придут цены для обоих токенов
+                            # Если один пришёл — сохраняем, ждём второй
+                            if up_price is None or down_price is None:
+                                continue
 
                             if up_price is not None and down_price is not None:
                                 now  = time.time()
