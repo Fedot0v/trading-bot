@@ -59,7 +59,7 @@ SIGNAL_WINDOW_SEC        = 5     # окно для расчёта сигнала
 
 # Варианты выхода из позиции (секунды после сигнала)
 # Проверяем все варианты одновременно
-EXIT_WINDOWS = [3, 5, 8, 10, 15, 30]
+EXIT_WINDOWS = [3, 5, 10, 15, 30, 60, 120, 300]
 
 # Виртуальный капитал на сделку
 TRADE_SIZE_USD = 200
@@ -156,12 +156,12 @@ class DataCollector:
             "/app/data/live_trades.csv": [
                 "signal_ts", "direction", "btc_price_entry",
                 "poly_price_entry", "trade_size_usd",
-                "exit_3s", "exit_5s", "exit_8s", "exit_10s", "exit_15s", "exit_30s",
-                "pnl_3s", "pnl_5s", "pnl_8s", "pnl_10s", "pnl_15s", "pnl_30s",
-                "btc_move_3s", "btc_move_5s", "btc_move_8s",
-                "btc_move_10s", "btc_move_15s", "btc_move_30s",
-                "poly_move_3s", "poly_move_5s", "poly_move_8s",
-                "poly_move_10s", "poly_move_15s", "poly_move_30s",
+                "exit_3s", "exit_5s", "exit_10s", "exit_15s", "exit_30s", "exit_60s", "exit_120s", "exit_300s",
+                "pnl_3s", "pnl_5s", "pnl_10s", "pnl_15s", "pnl_30s", "pnl_60s", "pnl_120s", "pnl_300s",
+                "btc_move_3s", "btc_move_5s",
+                "btc_move_10s", "btc_move_15s", "btc_move_30s", "btc_move_60s", "btc_move_120s", "btc_move_300s",
+                "poly_move_3s", "poly_move_5s",
+                "poly_move_10s", "poly_move_15s", "poly_move_30s", "poly_move_60s", "poly_move_120s", "poly_move_300s",
             ],
         }
 
@@ -792,37 +792,48 @@ async def polymarket_fast_poll(collector: DataCollector, market: dict):
                         for event in events:
                             etype = event.get("event_type", "")
 
-                            if etype == "last_trade_price":
-                                # Только реальные сделки — без артефактов мидпоинта
-                                aid = event.get("asset_id")
-                                p   = event.get("price")
-                                if aid and p:
+                            if etype == "book":
+                                aid  = event.get("asset_id")
+                                bids = event.get("bids", [])
+                                asks = event.get("asks", [])
+                                if aid and bids and asks:
                                     try:
-                                        price_cents = round(float(p) * 100, 2)
-                                        # Игнорируем ровно 50¢ — может быть дефолтным значением
-                                        if price_cents != 50.0:
-                                            prices[aid] = price_cents
-                                            updated = True
+                                        bb = float(bids[0]["price"])
+                                        ba = float(asks[0]["price"])
+                                        prices[aid] = round((bb + ba) / 2 * 100, 2)
+                                        updated = True
                                     except: pass
 
                             elif etype == "price_change":
-                                # price_change как резерв — используем только если есть реальный спред
                                 for pc in event.get("price_changes", []):
                                     aid = pc.get("asset_id")
                                     bb  = pc.get("best_bid")
                                     ba  = pc.get("best_ask")
                                     if aid and bb and ba:
                                         try:
-                                            bb_f = float(bb)
-                                            ba_f = float(ba)
-                                            spread = ba_f - bb_f
-                                            # Только если спред разумный (< 10%) и обе стороны живые
-                                            if bb_f > 0.02 and ba_f < 0.98 and spread < 0.10:
-                                                mid = round((bb_f + ba_f) / 2 * 100, 2)
-                                                prices[aid] = mid
-                                                updated = True
+                                            prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
+                                            updated = True
                                         except: pass
-                            
+
+                            elif etype == "best_bid_ask":
+                                aid = event.get("asset_id")
+                                bb  = event.get("best_bid")
+                                ba  = event.get("best_ask")
+                                if aid and bb and ba:
+                                    try:
+                                        prices[aid] = round((float(bb) + float(ba)) / 2 * 100, 2)
+                                        updated = True
+                                    except: pass
+
+                            elif etype == "last_trade_price":
+                                aid = event.get("asset_id")
+                                p   = event.get("price")
+                                if aid and p:
+                                    try:
+                                        prices[aid] = round(float(p) * 100, 2)
+                                        updated = True
+                                    except: pass
+
                         if updated and prices:
                             up_price = down_price = None
                             for tid, p in prices.items():
