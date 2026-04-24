@@ -59,7 +59,7 @@ SIGNAL_WINDOW_SEC        = 5     # окно для расчёта сигнала
 
 # Варианты выхода из позиции (секунды после сигнала)
 # Проверяем все варианты одновременно
-EXIT_WINDOWS = [3, 5, 8, 10, 15, 30]
+EXIT_WINDOWS = [3, 5, 10, 15, 30, 60, 120, 300]
 
 # Виртуальный капитал на сделку
 TRADE_SIZE_USD = 200
@@ -156,12 +156,12 @@ class DataCollector:
             "/app/data/live_trades.csv": [
                 "signal_ts", "direction", "btc_price_entry",
                 "poly_price_entry", "trade_size_usd",
-                "exit_3s", "exit_5s", "exit_8s", "exit_10s", "exit_15s", "exit_30s",
-                "pnl_3s", "pnl_5s", "pnl_8s", "pnl_10s", "pnl_15s", "pnl_30s",
-                "btc_move_3s", "btc_move_5s", "btc_move_8s",
-                "btc_move_10s", "btc_move_15s", "btc_move_30s",
-                "poly_move_3s", "poly_move_5s", "poly_move_8s",
-                "poly_move_10s", "poly_move_15s", "poly_move_30s",
+                "exit_3s", "exit_5s", "exit_10s", "exit_15s", "exit_30s", "exit_60s", "exit_120s", "exit_300s",
+                "pnl_3s", "pnl_5s", "pnl_10s", "pnl_15s", "pnl_30s", "pnl_60s", "pnl_120s", "pnl_300s",
+                "btc_move_3s", "btc_move_5s",
+                "btc_move_10s", "btc_move_15s", "btc_move_30s", "btc_move_60s", "btc_move_120s", "btc_move_300s",
+                "poly_move_3s", "poly_move_5s",
+                "poly_move_10s", "poly_move_15s", "poly_move_30s", "poly_move_60s", "poly_move_120s", "poly_move_300s",
             ],
         }
 
