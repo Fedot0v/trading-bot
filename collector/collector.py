@@ -78,6 +78,7 @@ RUN_DURATION_SEC = 0
 # Минимальный интервал между сигналами (секунды)
 # Чтобы не спамить сигналами в одном кластере
 MIN_SIGNAL_INTERVAL_SEC = 30  # cooldown между сигналами
+PRICE_MOVE_THRESHOLD    = 0.05  # минимальное движение цены BTC за 5с (%)
 
 # ─────────────────────────────────────────
 
@@ -231,6 +232,15 @@ class DataCollector:
             return None
         if len(window) < TRADE_COUNT_MIN:
             return None
+
+        # Проверяем реальное движение цены — фильтр тихих трендов
+        # Сигнал должен сопровождаться ценовым импульсом
+        if len(window) >= 2:
+            price_now  = window[-1].price
+            price_ago  = window[0].price
+            price_move = abs(price_now - price_ago) / price_ago * 100
+            if price_move < PRICE_MOVE_THRESHOLD:
+                return None
 
         # Минимальный интервал между сигналами
         if now - self.last_signal_ts < MIN_SIGNAL_INTERVAL_SEC:
@@ -1035,7 +1045,7 @@ async def main():
             print(f"  CLOB API: ОШИБКА — {e}")
     await _check()
     print("[ДИАГНОСТИКА] Готово\n")
-    print(f"  Сигнал: flow_imb>={FLOW_IMBALANCE_THRESHOLD} | "
+    print(f"  Сигнал: flow_imb>={FLOW_IMBALANCE_THRESHOLD} | price_move>={PRICE_MOVE_THRESHOLD}% | "
           f"count>={TRADE_COUNT_MIN} | cvd>=${CVD_THRESHOLD:,}")
     print(f"  Окно сигнала: {SIGNAL_WINDOW_SEC}с")
     print(f"  Выходы: {EXIT_WINDOWS}с")
