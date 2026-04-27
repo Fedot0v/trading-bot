@@ -78,7 +78,7 @@ RUN_DURATION_SEC = 0
 # Минимальный интервал между сигналами (секунды)
 # Чтобы не спамить сигналами в одном кластере
 MIN_SIGNAL_INTERVAL_SEC = 30  # cooldown между сигналами
-PRICE_MOVE_THRESHOLD    = 0.05  # минимальное движение цены BTC за 5с (%)
+PRICE_MOVE_THRESHOLD    = 0.02  # минимальное движение цены BTC за 5с (%)
 
 # ─────────────────────────────────────────
 
@@ -233,18 +233,17 @@ class DataCollector:
         if len(window) < TRADE_COUNT_MIN:
             return None
 
+        # Cooldown — проверяем ДО дорогих вычислений
+        if now - self.last_signal_ts < MIN_SIGNAL_INTERVAL_SEC:
+            return None
+
         # Проверяем реальное движение цены — фильтр тихих трендов
-        # Сигнал должен сопровождаться ценовым импульсом
         if len(window) >= 2:
             price_now  = window[-1].price
             price_ago  = window[0].price
             price_move = abs(price_now - price_ago) / price_ago * 100
             if price_move < PRICE_MOVE_THRESHOLD:
                 return None
-
-        # Минимальный интервал между сигналами
-        if now - self.last_signal_ts < MIN_SIGNAL_INTERVAL_SEC:
-            return None
 
         btc_price = window[-1].price
 
@@ -404,6 +403,11 @@ class DataCollector:
         """Финализирует сделку — записывает в CSV."""
         entry_price = (sig.poly_up_price if sig.direction == "BUY"
                       else sig.poly_down_price)
+
+        # Фильтр цены входа: только 20-80¢
+        # Исключаем рынки где исход уже очевиден
+        if entry_price is None or entry_price <= 20.0 or entry_price >= 80.0:
+            return
 
         row = [
             f"{sig.ts:.3f}",
